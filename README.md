@@ -1,12 +1,12 @@
 # Agenda Docente
 
-> Versão atual: **beta_01-p** (`0.1.0-beta.1`)
+> Versão atual: **V2.1.0926** (`0.2.1-0926`)
 
 ## Produção
 
 - Aplicação: https://agenda-docente.pages.dev
-- Backend: projeto Supabase `efskdnzciczzjhpijpvq` na região `sa-east-1`
-- Acesso: privado, sem cadastro público
+- Backend: projeto Supabase `bjurlhpvjknfsqmibyjb` na região `sa-east-1`
+- Acesso: privado com suporte a Login Social (Google OAuth) e e-mail/senha
 - Primeiro acesso: a conta provisionada deve trocar a senha temporária antes de abrir a agenda
 
 O segredo temporário não deve ser registrado no repositório. A política remota exige no mínimo 12 caracteres, com letras minúsculas, maiúsculas, números e símbolos.
