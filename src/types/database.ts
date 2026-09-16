@@ -12,6 +12,7 @@ export interface Profile {
   week_starts_on: number
   show_weekends: boolean
   hour_format: '24h'
+  account_status?: 'pending_approval' | 'active' | 'suspended'
   created_at: string
   updated_at: string
 }
@@ -51,6 +52,9 @@ export interface TeachingClass {
   updated_at: string
   color_token?: string | null
   note_text?: string | null
+  meeting_url?: string | null
+  drive_url?: string | null
+  contact_info?: string | null
 }
 
 export interface EventRow {
@@ -121,4 +125,52 @@ export interface ImportBatch {
   started_at: string
   completed_at: string | null
   created_at: string
+}
+
+export interface UserRoleRow {
+  id?: string
+  user_id: string
+  role: 'master' | 'admin' | 'professor' | 'mentor'
+  created_at: string
+}
+
+export interface ClassTaskRow {
+  id: string
+  user_id: string
+  class_id: string
+  title: string
+  is_pinned: boolean
+  is_completed: boolean
+  archived_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface UserActionRow {
+  id: string
+  user_id: string
+  institution_id: string | null
+  class_id: string | null
+  cycle_id: string | null
+  title: string
+  due_date: string | null
+  status: 'pending' | 'completed'
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface InstitutionIntegrationRow {
+  id: string
+  institution_id: string
+  user_id: string
+  provider: 'google_calendar' | 'moodle' | 'teams' | 'canvas' | 'airtable' | 'custom_api'
+  display_name: string
+  api_endpoint: string | null
+  auth_type: string
+  api_key_encrypted: string | null
+  is_active: boolean
+  allow_admin_access: boolean
+  created_at: string
+  updated_at: string
 }

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { requireSupabase } from '../../lib/supabase/client'
 import type { EventWithRelations } from '../../types/domain'
 import type {
-  ActionProgressRow, Cycle, EventActionRow, EventRow, ImportBatch, Institution, Profile, TeachingClass,
+  ActionProgressRow, ClassTaskRow, Cycle, EventActionRow, EventRow, ImportBatch, Institution, Profile, TeachingClass, UserActionRow,
 } from '../../types/database'
 
 export const queryKeys = {
@@ -173,3 +173,151 @@ export function useSaveEventNote(cycleId?: string) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.events(cycleId) }),
   })
 }
+
+export function useUserActions(cycleId?: string) {
+  return useQuery({
+    queryKey: ['user_actions', cycleId ?? 'all'],
+    queryFn: async () => {
+      let query = requireSupabase().from('user_actions').select('*').order('created_at', { ascending: false })
+      if (cycleId) query = query.or(`cycle_id.eq.${cycleId},cycle_id.is.null`)
+      const result = await query
+      if (result.error) throw new Error(result.error.message)
+      return (result.data || []) as UserActionRow[]
+    },
+  })
+}
+
+export function useCreateUserAction(_cycleId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { userId: string; title: string; dueDate?: string; classId?: string; cycleId?: string }) => {
+      const result = await requireSupabase().from('user_actions').insert({
+        user_id: payload.userId,
+        title: payload.title,
+        due_date: payload.dueDate || null,
+        class_id: payload.classId || null,
+        cycle_id: payload.cycleId || null,
+        status: 'pending',
+      }).select().single()
+      if (result.error) throw new Error(result.error.message)
+      return result.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user_actions'] })
+    },
+  })
+}
+
+export function useToggleUserAction(_cycleId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: 'pending' | 'completed' }) => {
+      const result = await requireSupabase().from('user_actions').update({
+        status,
+        completed_at: status === 'completed' ? new Date().toISOString() : null,
+      }).eq('id', id).select().single()
+      if (result.error) throw new Error(result.error.message)
+      return result.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user_actions'] })
+    },
+  })
+}
+
+export function useDeleteUserAction(_cycleId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const result = await requireSupabase().from('user_actions').delete().eq('id', id)
+      if (result.error) throw new Error(result.error.message)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user_actions'] })
+    },
+  })
+}
+
+export function useClassTasks(classId?: string) {
+  return useQuery({
+    queryKey: ['class_tasks', classId ?? 'none'],
+    enabled: Boolean(classId),
+    queryFn: async () => {
+      const result = await requireSupabase()
+        .from('class_tasks')
+        .select('*')
+        .eq('class_id', classId!)
+        .is('archived_at', null)
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false })
+      if (result.error) throw new Error(result.error.message)
+      return (result.data || []) as ClassTaskRow[]
+    },
+  })
+}
+
+export function useCreateClassTask(classId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ userId, classId, title }: { userId: string; classId: string; title: string }) => {
+      const result = await requireSupabase().from('class_tasks').insert({
+        user_id: userId,
+        class_id: classId,
+        title,
+        is_pinned: false,
+        is_completed: false,
+      }).select().single()
+      if (result.error) throw new Error(result.error.message)
+      return result.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+    },
+  })
+}
+
+export function useToggleClassTask(classId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, isCompleted }: { id: string; isCompleted: boolean }) => {
+      const result = await requireSupabase().from('class_tasks').update({
+        is_completed: isCompleted,
+      }).eq('id', id).select().single()
+      if (result.error) throw new Error(result.error.message)
+      return result.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+    },
+  })
+}
+
+export function usePinClassTask(classId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, isPinned }: { id: string; isPinned: boolean }) => {
+      const result = await requireSupabase().from('class_tasks').update({
+        is_pinned: isPinned,
+      }).eq('id', id).select().single()
+      if (result.error) throw new Error(result.error.message)
+      return result.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+    },
+  })
+}
+
+export function useDeleteClassTask(classId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const result = await requireSupabase().from('class_tasks').delete().eq('id', id)
+      if (result.error) throw new Error(result.error.message)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+    },
+  })
+}
+

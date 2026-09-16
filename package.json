@@ -1,7 +1,7 @@
 {
   "name": "agenda-docente",
-  "version": "0.1.0-beta.1",
-  "releaseLabel": "beta_01-p",
+  "version": "0.2.1-0926",
+  "releaseLabel": "V2.1.0926",
   "private": true,
   "type": "module",
   "engines": {
@@ -27,6 +27,7 @@
     "@fullcalendar/list": "6.1.21",
     "@fullcalendar/react": "6.1.21",
     "@fullcalendar/timegrid": "6.1.21",
+    "@google/genai": "^2.22.0",
     "@supabase/supabase-js": "2.112.3",
     "@tanstack/react-query": "5.101.4",
     "class-variance-authority": "0.7.1",
@@ -44,6 +45,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.62.1",
+    "@rolldown/binding-win32-x64-msvc": "^1.2.8",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.2",

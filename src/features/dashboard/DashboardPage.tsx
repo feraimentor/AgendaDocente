@@ -1,4 +1,5 @@
-import { ArrowUpRight, CalendarCheck2, Check, CheckSquare2, Clock3, Import, Sparkles, TriangleAlert } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowUpRight, CalendarCheck2, Check, CheckSquare2, Clock3, Import, RefreshCw, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState } from '../../components/ui'
 import { useAuth } from '../auth/AuthProvider'
@@ -6,6 +7,7 @@ import { useEvents, useImports, useProfile, useToggleAction } from '../data/quer
 import { useWorkspace } from '../../app/providers/WorkspaceProvider'
 import { cycleProgress, findScheduleConflicts, totalKnownHours } from '../../lib/schedule/metrics'
 import { formatLongDate, getTemporalEventState, nextScheduleEvent, todayIso } from '../../lib/dates/schedule'
+import { generateDailyBriefing } from '../../lib/ai/gemini'
 import type { EventWithRelations } from '../../types/domain'
 
 export function DashboardPage() {
@@ -19,7 +21,17 @@ export function DashboardPage() {
   const now = new Date()
   const today = todayIso(now, timeZone)
 
-  if (eventsQuery.isLoading || profile.isLoading) return <LoadingState label="Montando seu cockpit…" />
+  const [briefing, setBriefing] = useState<string>('')
+  const [loadingBriefing, setLoadingBriefing] = useState(false)
+  const [dismissedConflicts, setDismissedConflicts] = useState<string[]>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('dismissed_conflicts') || '[]')
+    } catch {
+      return []
+    }
+  })
+
+  if (eventsQuery.isLoading || profile.isLoading) return <LoadingState label="Montando seu cockpit sereno…" />
   if (eventsQuery.isError) return <ErrorState message={eventsQuery.error.message} retry={() => void eventsQuery.refetch()} />
   const allEvents = eventsQuery.data ?? []
   const events = selectedClassId ? allEvents.filter((event) => event.classId === selectedClassId) : allEvents
@@ -30,26 +42,199 @@ export function DashboardPage() {
   const pendingActions = events.filter((event) => event.actionId && event.actionStatus !== 'completed')
   const weekEvents = filterCurrentWeek(events, today)
   const progress = cycleProgress(events, now, timeZone)
-  const conflicts = findScheduleConflicts(events)
+  
+  // Regra Calm Tech: apenas conflitos presentes ou futuros (date >= today) e que não foram dispensados
+  const conflicts = findScheduleConflicts(events).filter(
+    (c) => c.date >= today && !dismissedConflicts.includes(`${c.date}_${c.first.classCode}_${c.second.classCode}`)
+  )
+
   const displayName = profile.data?.display_name || profile.data?.full_name?.split(' ')[0] || 'Professor'
   const greeting = greetingFor(now, timeZone)
 
+  const handleDismissConflict = (conflictKey: string) => {
+    const updated = [...dismissedConflicts, conflictKey]
+    setDismissedConflicts(updated)
+    try {
+      sessionStorage.setItem('dismissed_conflicts', JSON.stringify(updated))
+    } catch {
+      // noop
+    }
+  }
+
+  const loadBriefing = async () => {
+    setLoadingBriefing(true)
+    const text = await generateDailyBriefing({
+      teacherName: displayName,
+      dateStr: formatLongDate(today),
+      todayCount: todayEvents.length,
+      nextEvent: next ? { title: next.title, time: next.startTime || 'A definir', classCode: next.classCode } : undefined,
+      pendingActionsCount: pendingActions.length,
+    })
+    setBriefing(text)
+    setLoadingBriefing(false)
+  }
+
+  useEffect(() => {
+    void loadBriefing()
+  }, [todayEvents.length, pendingActions.length, next?.id])
+
   return <div className="dashboard">
-    <header className="dashboard-header"><div><p className="eyebrow">{greeting}, {displayName}</p><h1>{formatLongDate(today)}</h1><p>{todayEvents.length ? 'Aqui está o ritmo do seu dia.' : 'Um dia mais leve por aqui.'}</p></div><div className="header-meta"><span>Última atualização</span><strong>{imports.data?.[0]?.completed_at ? relativeDate(imports.data[0].completed_at) : 'Ainda não importado'}</strong><Link className="button button-secondary button-sm" to="/imports/new"><Import size={15} /> Atualizar cronograma</Link></div></header>
+    <header className="dashboard-header">
+      <div>
+        <p className="eyebrow">{greeting}, {displayName}</p>
+        <h1>{formatLongDate(today)}</h1>
+        <p>{todayEvents.length ? 'Aqui está o ritmo do seu dia.' : 'Um dia mais leve por aqui.'}</p>
+      </div>
+      <div className="header-meta">
+        <span>Última atualização</span>
+        <strong>{imports.data?.[0]?.completed_at ? relativeDate(imports.data[0].completed_at) : 'Ainda não importado'}</strong>
+        <Link className="button button-secondary button-sm" to="/imports/new">
+          <Import size={15} /> Atualizar cronograma
+        </Link>
+      </div>
+    </header>
+
+    {/* Calm Tech: Briefing Matinal Inteligente com Google Gemini */}
+    {briefing && (
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(56, 189, 248, 0.05) 100%)',
+        border: '1px solid rgba(16, 185, 129, 0.2)',
+        borderRadius: '1rem',
+        padding: '1.25rem 1.5rem',
+        marginBottom: '1.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '1rem',
+        backdropFilter: 'blur(8px)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.875rem' }}>
+          <span style={{ color: '#10b981', marginTop: '0.125rem' }}><Sparkles size={20} /></span>
+          <div>
+            <strong style={{ display: 'block', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#10b981', marginBottom: '0.25rem' }}>
+              Briefing Sereno · Gemini AI
+            </strong>
+            <p style={{ margin: 0, fontSize: '0.9375rem', lineHeight: 1.5, color: 'var(--color-text, #f8fafc)' }}>
+              {briefing}
+            </p>
+          </div>
+        </div>
+        <Button variant="ghost" size="icon" aria-label="Atualizar briefing" onClick={() => void loadBriefing()} loading={loadingBriefing}>
+          <RefreshCw size={15} />
+        </Button>
+      </div>
+    )}
 
     <section className="hero-grid">
-      <Card className="now-card"><div className="now-card-top"><span className="live-dot" /><span>Agora / próxima aula</span><Sparkles size={17} /></div>{next ? <NextEvent event={next} now={now} timeZone={timeZone} todayCount={todayEvents.length} /> : <div className="now-empty"><h2>Ciclo concluído</h2><p>Não há próximos eventos neste cronograma.</p></div>}</Card>
-      <div className="kpi-grid"><Kpi label="Aulas hoje" value={String(todayEvents.length)} icon={<CalendarCheck2 />} /><Kpi label="Aulas na semana" value={String(weekEvents.length)} icon={<CalendarCheck2 />} /><Kpi label="Horas na semana" value={formatHours(totalKnownHours(weekEvents))} icon={<Clock3 />} /><Kpi label="Ações pendentes" value={String(pendingActions.length)} icon={<CheckSquare2 />} /></div>
+      <Card className="now-card">
+        <div className="now-card-top">
+          <span className="live-dot" />
+          <span>Agora / próxima aula</span>
+          <Sparkles size={17} />
+        </div>
+        {next ? (
+          <NextEvent event={next} now={now} timeZone={timeZone} todayCount={todayEvents.length} />
+        ) : (
+          <div className="now-empty">
+            <h2>Ciclo concluído</h2>
+            <p>Não há próximos eventos neste cronograma.</p>
+          </div>
+        )}
+      </Card>
+      <div className="kpi-grid">
+        <Kpi label="Aulas hoje" value={String(todayEvents.length)} icon={<CalendarCheck2 />} />
+        <Kpi label="Aulas na semana" value={String(weekEvents.length)} icon={<CalendarCheck2 />} />
+        <Kpi label="Horas na semana" value={formatHours(totalKnownHours(weekEvents))} icon={<Clock3 />} />
+        <Kpi label="Ações pendentes" value={String(pendingActions.length)} icon={<CheckSquare2 />} />
+      </div>
     </section>
 
-    {conflicts.length > 0 && <div className="warning-banner"><TriangleAlert size={18} /><div><strong>Conflito de horário detectado</strong><span>{conflicts[0]?.date} · {conflicts[0]?.first.classCode} e {conflicts[0]?.second.classCode}</span></div></div>}
+    {/* Conflito de Horário Inteligente com Botão de Dispensar */}
+    {conflicts.length > 0 && conflicts[0] && (
+      <div className="warning-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <TriangleAlert size={18} />
+          <div>
+            <strong>Conflito de horário detectado</strong>
+            <span>{conflicts[0].date} · {conflicts[0].first.classCode} e {conflicts[0].second.classCode}</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Dispensar aviso de conflito"
+          onClick={() => {
+            const firstConflict = conflicts[0]
+            if (firstConflict) {
+              handleDismissConflict(`${firstConflict.date}_${firstConflict.first.classCode}_${firstConflict.second.classCode}`)
+            }
+          }}
+          style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: '0.25rem', opacity: 0.8 }}
+        >
+          <X size={18} />
+        </button>
+      </div>
+    )}
 
     <section className="dashboard-columns">
-      <Card className="section-card"><div className="section-heading"><div><p className="eyebrow">Próximos dias</p><h2>Compromissos</h2></div><Link to="/agenda">Ver agenda <ArrowUpRight size={15} /></Link></div><div className="upcoming-list">{events.filter((event) => event.eventDate >= today).slice(0, 5).map((event) => <EventRow key={event.id ?? event.identityHash} event={event} today={today} />)}</div></Card>
-      <Card className="section-card"><div className="section-heading"><div><p className="eyebrow">Foco</p><h2>Minhas ações</h2></div><Link to="/actions">Ver todas <ArrowUpRight size={15} /></Link></div><div className="action-list">{pendingActions.length ? pendingActions.slice(0, 4).map((event) => <div className="quick-action" key={event.actionId}><span className={`class-dot color-${event.classColor ?? 'teal'}`} /><div><strong>{event.actionText}</strong><span>{event.classCode} · {shortDate(event.eventDate)}</span></div><Button size="icon" variant="secondary" aria-label={`Concluir ${event.actionText}`} onClick={() => event.actionId && toggleAction.mutate({ actionId: event.actionId, status: 'completed' })}><Check size={16} /></Button></div>) : <p className="muted-block">Tudo em dia. Nenhuma ação pendente.</p>}</div></Card>
+      <Card className="section-card">
+        <div className="section-heading">
+          <div><p className="eyebrow">Próximos dias</p><h2>Compromissos</h2></div>
+          <Link to="/agenda">Ver agenda <ArrowUpRight size={15} /></Link>
+        </div>
+        <div className="upcoming-list">
+          {events.filter((event) => event.eventDate >= today).slice(0, 5).map((event) => (
+            <EventRow key={event.id ?? event.identityHash} event={event} today={today} />
+          ))}
+        </div>
+      </Card>
+      <Card className="section-card">
+        <div className="section-heading">
+          <div><p className="eyebrow">Foco</p><h2>Minhas ações</h2></div>
+          <Link to="/actions">Ver todas <ArrowUpRight size={15} /></Link>
+        </div>
+        <div className="action-list">
+          {pendingActions.length ? (
+            pendingActions.slice(0, 4).map((event) => (
+              <div className="quick-action" key={event.actionId}>
+                <span className={`class-dot color-${event.classColor ?? 'teal'}`} />
+                <div>
+                  <strong>{event.actionText}</strong>
+                  <span>{event.classCode} · {shortDate(event.eventDate)}</span>
+                </div>
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  aria-label={`Concluir ${event.actionText}`}
+                  onClick={() => event.actionId && toggleAction.mutate({ actionId: event.actionId, status: 'completed' })}
+                >
+                  <Check size={16} />
+                </Button>
+              </div>
+            ))
+          ) : (
+            <p className="muted-block">Tudo em dia. Nenhuma ação pendente.</p>
+          )}
+        </div>
+      </Card>
     </section>
 
-    <section className="dashboard-columns lower"><Card className="section-card"><div className="section-heading"><div><p className="eyebrow">Visão rápida</p><h2>Minha semana</h2></div></div><WeekStrip events={weekEvents} today={today} /></Card><Card className="progress-card"><p className="eyebrow">Progresso do ciclo</p><div className="progress-number"><strong>{progress}%</strong><span>das aulas transcorridas</span></div><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><p>{events.filter((event) => event.eventDate < today).length} de {events.length} encontros já passaram</p></Card></section>
+    <section className="dashboard-columns lower">
+      <Card className="section-card">
+        <div className="section-heading"><div><p className="eyebrow">Visão rápida</p><h2>Minha semana</h2></div></div>
+        <WeekStrip events={weekEvents} today={today} />
+      </Card>
+      <Card className="progress-card">
+        <p className="eyebrow">Progresso do ciclo</p>
+        <div className="progress-number">
+          <strong>{progress}%</strong>
+          <span>das aulas transcorridas</span>
+        </div>
+        <div className="progress-track">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+        <p>{events.filter((event) => event.eventDate < today).length} de {events.length} encontros já passaram</p>
+      </Card>
+    </section>
   </div>
 }
 

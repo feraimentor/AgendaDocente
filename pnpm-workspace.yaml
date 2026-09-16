@@ -1,5 +1,7 @@
 allowBuilds:
+  '@google/genai': true
   esbuild: true
+  protobufjs: true
   workerd: true
 minimumReleaseAgeExclude:
   - '@supabase/auth-js@2.112.3'

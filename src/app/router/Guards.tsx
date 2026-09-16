@@ -12,6 +12,20 @@ export function AuthGate() {
   return <Outlet />
 }
 
+export function ApprovalGate() {
+  const { accountStatus, isMaster } = useAuth()
+  if (!isMaster && accountStatus === 'pending_approval') {
+    return <Navigate to="/pending-approval" replace />
+  }
+  return <Outlet />
+}
+
+export function AdminGate() {
+  const { isMaster, isAdmin } = useAuth()
+  if (!isMaster && !isAdmin) return <Navigate to="/" replace />
+  return <Outlet />
+}
+
 export function ProfileGate() {
   const { user } = useAuth()
   const profile = useProfile(user?.id)
@@ -26,3 +40,4 @@ export function FirstAccessGate() {
   if (requiresPasswordChange(user)) return <Navigate to="/first-access" replace />
   return <Outlet />
 }
+
