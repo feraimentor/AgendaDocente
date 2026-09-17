@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, FileSpreadsheet, History, Import, 
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, PageTitle } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, PageTitle } from '../../components/ui'
 import { useWorkspace } from '../../app/providers/WorkspaceProvider'
 import { queryKeys, useCycles, useImports, useInstitutions } from '../data/queries'
 import { useAuth } from '../auth/AuthProvider'
@@ -29,11 +29,9 @@ export function ImportsPage() {
 
 export function NewImportPage() {
   const { user } = useAuth()
-  const { selectedCycleId } = useWorkspace()
+  const { selectedCycleId, setSelectedCycleId } = useWorkspace()
   const cycles = useCycles()
   const institutions = useInstitutions()
-  const imports = useImports(selectedCycleId)
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -44,58 +42,242 @@ export function NewImportPage() {
   const [manualMapping, setManualMapping] = useState<CsvColumnMapping>({})
   const [processing, setProcessing] = useState(false)
   const [importing, setImporting] = useState(false)
-  const cycle = cycles.data?.find((item) => item.id === selectedCycleId)
-  const institution = institutions.data?.find((item) => item.id === cycle?.institution_id)
-  const identical = imports.data?.[0]?.file_hash === fileHash && imports.data?.[0]?.status === 'succeeded'
+
+  // Controle de Destino (Instituição & Ciclo)
+  const [targetInstitutionId, setTargetInstitutionId] = useState<string>('')
+  const [isNewInstitution, setIsNewInstitution] = useState<boolean>(false)
+  const [newInstitutionName, setNewInstitutionName] = useState<string>('')
+  const [newInstitutionShortName, setNewInstitutionShortName] = useState<string>('')
+
+  const [targetCycleId, setTargetCycleId] = useState<string>('')
+  const [isNewCycle, setIsNewCycle] = useState<boolean>(false)
+  const [newCycleCode, setNewCycleCode] = useState<string>('')
+
+  // Estado de sucesso da última importação para permitir fluxo contínuo
+  const [lastImported, setLastImported] = useState<{
+    batchId: string
+    cycleCode: string
+    institutionName: string
+    eventCount: number
+    classCount: number
+  } | null>(null)
+
+  const hasExistingInstitutions = Boolean(institutions.data && institutions.data.length > 0)
+
+  // Sincronização inicial inteligente
+  const initializedRef = useRef(false)
+  if (!initializedRef.current && institutions.data !== undefined) {
+    initializedRef.current = true
+    if (institutions.data.length > 0) {
+      // Se há um ciclo ativo no workspace, acha a instituição dele
+      const activeCycle = cycles.data?.find((c) => c.id === selectedCycleId)
+      if (activeCycle) {
+        setTargetInstitutionId(activeCycle.institution_id)
+        setTargetCycleId(activeCycle.id)
+      } else {
+        const firstInst = institutions.data[0]
+        if (firstInst) {
+          setTargetInstitutionId(firstInst.id)
+          const instCycles = (cycles.data || []).filter((c) => c.institution_id === firstInst.id)
+          const firstCycle = instCycles[0]
+          if (firstCycle) {
+            setTargetCycleId(firstCycle.id)
+          } else {
+            setIsNewCycle(true)
+          }
+        } else {
+          setIsNewInstitution(true)
+          setIsNewCycle(true)
+        }
+      }
+    } else {
+      setIsNewInstitution(true)
+      setIsNewCycle(true)
+    }
+  }
+
+  // Ciclos disponíveis para a instituição selecionada
+  const availableCycles = (cycles.data || []).filter((c) => c.institution_id === targetInstitutionId)
+
+  // Checagem de importações para o ciclo alvo
+  const activeCycleIdForCheck = (!isNewInstitution && !isNewCycle && targetCycleId) ? targetCycleId : undefined
+  const cycleImports = useImports(activeCycleIdForCheck)
+  const identical = Boolean(
+    activeCycleIdForCheck &&
+    fileHash &&
+    cycleImports.data?.[0]?.file_hash === fileHash &&
+    cycleImports.data?.[0]?.status === 'succeeded'
+  )
+
+  const suggestCycleCode = (startDate?: string | null): string => {
+    if (!startDate) return '2026.2'
+    const date = new Date(`${startDate}T00:00:00Z`)
+    const year = isNaN(date.getUTCFullYear()) ? new Date().getFullYear() : date.getUTCFullYear()
+    const month = isNaN(date.getUTCMonth()) ? 7 : date.getUTCMonth() + 1
+    return `${year}.${month >= 7 ? 2 : 1}`
+  }
 
   const processFile = async (nextFile: File) => {
     if (!nextFile.name.toLowerCase().endsWith('.csv')) return toast.error('Selecione um arquivo .csv.')
-    setProcessing(true); setFile(nextFile); setPreview(null)
+    setProcessing(true)
+    setFile(nextFile)
+    setPreview(null)
+    setLastImported(null)
     try {
       const bytes = new Uint8Array(await nextFile.arrayBuffer())
       const decoded = decodeCsvBytes(bytes)
       const [hash, parsed] = await Promise.all([sha256Bytes(bytes), parseScheduleCsv(decoded.text)])
-      setFileHash(hash); setPreview(parsed); setEncoding(decoded.encoding); setCsvText(decoded.text); setManualMapping({})
-    } catch (caught) { toast.error(caught instanceof Error ? caught.message : 'Não foi possível ler o CSV.') }
-    finally { setProcessing(false) }
+      setFileHash(hash)
+      setPreview(parsed)
+      setEncoding(decoded.encoding)
+      setCsvText(decoded.text)
+      setManualMapping({})
+
+      // Sugere código do ciclo se ainda não tiver preenchido
+      if (!newCycleCode && (isNewCycle || isNewInstitution || availableCycles.length === 0)) {
+        setNewCycleCode(suggestCycleCode(parsed.periodStart))
+      }
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Não foi possível ler o CSV.')
+    } finally {
+      setProcessing(false)
+    }
   }
 
-  const drop = (event: DragEvent) => { event.preventDefault(); const next = event.dataTransfer.files[0]; if (next) void processFile(next) }
+  const drop = (event: DragEvent) => {
+    event.preventDefault()
+    const next = event.dataTransfer.files[0]
+    if (next) void processFile(next)
+  }
+
   const applyManualMapping = async () => {
     if (!csvText) return
     setProcessing(true)
-    try { setPreview(await parseScheduleCsv(csvText, manualMapping)) }
-    finally { setProcessing(false) }
-  }
-  const confirm = async () => {
-    if (!file || !preview || preview.fatal || !cycle || !institution || !user || !selectedCycleId) return
-    setImporting(true)
-    const batchId = crypto.randomUUID()
-    const storagePath = `${user.id}/${selectedCycleId}/${batchId}/original.csv`
-    const client = requireSupabase()
     try {
+      setPreview(await parseScheduleCsv(csvText, manualMapping))
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  // Validação dos dados de destino
+  const isInstitutionReady = !hasExistingInstitutions || isNewInstitution
+    ? Boolean(newInstitutionName.trim())
+    : Boolean(targetInstitutionId)
+
+  const isCycleReady = isNewInstitution || isNewCycle || availableCycles.length === 0
+    ? Boolean(newCycleCode.trim())
+    : Boolean(targetCycleId)
+
+  const canConfirm = Boolean(
+    file &&
+    preview &&
+    !preview.fatal &&
+    !identical &&
+    isInstitutionReady &&
+    isCycleReady &&
+    user
+  )
+
+  const confirm = async () => {
+    if (!file || !preview || preview.fatal || identical || !user) return
+    setImporting(true)
+    const client = requireSupabase()
+
+    try {
+      let finalInstitutionId = targetInstitutionId
+      let finalInstitutionName = ''
+
+      // 1. Resolver Instituição
+      if (!hasExistingInstitutions || isNewInstitution) {
+        const trimmedName = newInstitutionName.trim()
+        if (!trimmedName) throw new Error('Informe o nome da instituição.')
+
+        // Verifica se já existe instituição com o mesmo nome para o usuário
+        const existing = institutions.data?.find(
+          (i) => i.name.trim().toLowerCase() === trimmedName.toLowerCase()
+        )
+        if (existing) {
+          finalInstitutionId = existing.id
+          finalInstitutionName = existing.name
+        } else {
+          const createdInst = await client.from('institutions').insert({
+            user_id: user.id,
+            name: trimmedName,
+            short_name: newInstitutionShortName.trim() || null,
+          }).select('id, name').single()
+
+          if (createdInst.error) throw createdInst.error
+          finalInstitutionId = String(createdInst.data.id)
+          finalInstitutionName = createdInst.data.name
+        }
+      } else {
+        const instObj = institutions.data?.find((i) => i.id === finalInstitutionId)
+        finalInstitutionName = instObj?.name || 'Instituição'
+      }
+
+      // 2. Resolver Ciclo
+      let finalCycleId = targetCycleId
+      let finalCycleCode = ''
+
+      if (isNewInstitution || isNewCycle || availableCycles.length === 0 || !finalCycleId) {
+        const trimmedCode = newCycleCode.trim()
+        if (!trimmedCode) throw new Error('Informe o código do ciclo.')
+
+        // Verifica se já existe ciclo com o mesmo código para essa instituição
+        const existingCycle = cycles.data?.find(
+          (c) => c.institution_id === finalInstitutionId && c.code.trim().toLowerCase() === trimmedCode.toLowerCase()
+        )
+        if (existingCycle) {
+          finalCycleId = existingCycle.id
+          finalCycleCode = existingCycle.code
+        } else {
+          const createdCycle = await client.from('cycles').insert({
+            user_id: user.id,
+            institution_id: finalInstitutionId,
+            code: trimmedCode,
+            start_date: preview.periodStart || null,
+            end_date: preview.periodEnd || null,
+          }).select('id, code').single()
+
+          if (createdCycle.error) throw createdCycle.error
+          finalCycleId = String(createdCycle.data.id)
+          finalCycleCode = createdCycle.data.code
+        }
+      } else {
+        const cycleObj = cycles.data?.find((c) => c.id === finalCycleId)
+        finalCycleCode = cycleObj?.code || 'Ciclo'
+      }
+
+      // 3. Preparar e Executar Importação
+      const batchId = crypto.randomUUID()
+      const storagePath = `${user.id}/${finalCycleId}/${batchId}/original.csv`
+
       const headerSignature = await sha256Text(preview.headers.map(normalizeHeader).join('|'))
       const existingTemplate = await client.from('import_templates').select('id').eq('header_signature', headerSignature).maybeSingle()
       if (existingTemplate.error) throw existingTemplate.error
+
       let templateId = existingTemplate.data ? String(existingTemplate.data.id) : null
       if (!templateId) {
         const template = await client.from('import_templates').insert({
           user_id: user.id,
-          institution_id: institution.id,
-          name: `Mapeamento ${institution.short_name || institution.name}`,
+          institution_id: finalInstitutionId,
+          name: `Mapeamento ${newInstitutionShortName.trim() || finalInstitutionName}`,
           header_signature: headerSignature,
           column_mapping: preview.columnMapping,
         }).select('id').single()
         if (template.error) throw template.error
         templateId = String(template.data.id)
       }
+
       const uploaded = await client.storage.from('schedule-imports').upload(storagePath, file, { contentType: file.type || 'text/csv', upsert: false })
       if (uploaded.error) throw uploaded.error
+
       const payload = preview.events.map(toRpcEvent)
       const result = await client.rpc('apply_schedule_import', {
         p_batch_id: batchId,
-        p_institution_id: institution.id,
-        p_cycle_id: selectedCycleId,
+        p_institution_id: finalInstitutionId,
+        p_cycle_id: finalCycleId,
         p_file_name: file.name,
         p_file_hash: fileHash,
         p_storage_path: storagePath,
@@ -104,30 +286,302 @@ export function NewImportPage() {
         p_payload: payload,
         p_template_id: templateId,
       })
+
       if (result.error) {
         await client.storage.from('schedule-imports').remove([storagePath])
         throw result.error
       }
+
+      setSelectedCycleId(finalCycleId)
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.events(selectedCycleId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.classes(selectedCycleId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.imports(selectedCycleId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.institutions }),
         queryClient.invalidateQueries({ queryKey: queryKeys.cycles }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.events(finalCycleId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.classes(finalCycleId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.imports(finalCycleId) }),
       ])
-      toast.success('Cronograma aplicado com segurança.')
-      navigate(`/imports/${batchId}`)
-    } catch (caught) { toast.error(caught instanceof Error ? caught.message : 'A importação falhou; o cronograma anterior foi preservado.') }
-    finally { setImporting(false) }
+
+      toast.success(`Cronograma salvo com sucesso no ciclo ${finalCycleCode}!`)
+
+      setLastImported({
+        batchId,
+        cycleCode: finalCycleCode,
+        institutionName: finalInstitutionName,
+        eventCount: preview.validRowCount,
+        classCount: preview.classes.length,
+      })
+
+      // Limpa os dados do arquivo atual para a tela ficar pronta para o próximo CSV
+      setFile(null)
+      setPreview(null)
+      setFileHash('')
+      setCsvText('')
+      setManualMapping({})
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'A importação falhou; o cronograma anterior foi preservado.')
+    } finally {
+      setImporting(false)
+    }
   }
 
-  return <div><PageTitle eyebrow="Nova versão" title="Importar cronograma" description="O arquivo é processado no navegador. Nada muda antes da sua confirmação." />
-    <div className="import-layout"><div><Card className={`dropzone ${file ? 'has-file' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={drop}><input ref={fileInput} type="file" accept=".csv,text/csv" hidden onChange={(event: ChangeEvent<HTMLInputElement>) => { const next = event.target.files?.[0]; if (next) void processFile(next) }} />{processing ? <LoadingState label="Lendo e validando o CSV…" /> : file ? <><span className="file-icon"><FileSpreadsheet /></span><h2>{file.name}</h2><p>{formatBytes(file.size)} · {encoding.toUpperCase()} · SHA-256 {fileHash.slice(0, 10)}…</p><Button variant="secondary" onClick={() => fileInput.current?.click()}>Trocar arquivo</Button></> : <><span className="drop-icon"><UploadCloud /></span><h2>Arraste seu CSV para cá</h2><p>ou selecione o arquivo oficial exportado do cronograma</p><Button onClick={() => fileInput.current?.click()}>Selecionar CSV</Button><small>Somente .csv · até 10 MB</small></>}</Card>
-      {identical && <div className="warning-banner positive"><CheckCircle2 /><div><strong>Este arquivo já é a versão atual.</strong><span>Nenhuma alteração é necessária e uma nova versão não será criada.</span></div></div>}
-      {preview?.fatal && preview.headers.length > 0 && <ManualMappingCard preview={preview} mapping={manualMapping} onChange={setManualMapping} onApply={() => void applyManualMapping()} loading={processing} />}
-      {preview && <PreviewTable preview={preview} />}</div>
-      <aside className="import-summary"><Card><p className="eyebrow">Destino</p><h2>{cycle?.code ?? 'Selecione um ciclo'}</h2><p>{institution?.name ?? 'Instituição não encontrada'}</p></Card>{preview && <Card><p className="eyebrow">Reconhecimento</p><h2>{preview.validRowCount} eventos</h2><dl><div><dt>Turmas</dt><dd>{preview.classes.length}</dd></div><div><dt>Período</dt><dd>{formatPeriod(preview.periodStart, preview.periodEnd)}</dd></div><div><dt>Ações CP</dt><dd>{preview.actionRowCount}</dd></div><div><dt>Horário pendente</dt><dd>{preview.pendingTimeCount}</dd></div></dl><div className="class-chips">{preview.classes.map((item) => <Badge key={item} tone="accent">{item}</Badge>)}</div></Card>}{preview && <Card className="validation-card"><p className="eyebrow">Validação</p>{preview.fatal ? <p className="validation error"><TriangleAlert /> Há erros bloqueantes.</p> : <p className="validation success"><ShieldCheck /> Pronto para importar.</p>}<ul>{preview.issues.slice(0, 5).map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.level}><span>{issue.level === 'error' ? 'Erro' : 'Aviso'}</span>{issue.message}{issue.row && <small>Linha {issue.row}</small>}</li>)}</ul></Card>}<Button className="confirm-import" disabled={!preview || preview.fatal || identical || !cycle} loading={importing} onClick={() => void confirm()}>{imports.data?.length ? 'Aplicar atualização' : `Importar ${cycle?.code ?? 'cronograma'}`} <ArrowRight size={16} /></Button></aside>
+  return (
+    <div>
+      <PageTitle
+        eyebrow="Nova versão"
+        title="Importar cronograma"
+        description="O arquivo é processado no navegador. Nada muda antes da sua confirmação."
+      />
+
+      {lastImported && (
+        <div className="warning-banner positive" style={{ marginBottom: '20px' }}>
+          <CheckCircle2 size={24} />
+          <div style={{ flex: 1 }}>
+            <strong>Cronograma salvo com sucesso!</strong>
+            <p style={{ margin: '4px 0 10px', fontSize: '0.84rem' }}>
+              Foram importados com êxito <strong>{lastImported.eventCount} eventos</strong> e <strong>{lastImported.classCount} turmas</strong> no ciclo <strong>{lastImported.cycleCode}</strong> ({lastImported.institutionName}).
+              A tela abaixo já está limpa e pronta para você importar outro cronograma de qualquer instituição.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Link className="button button-primary button-sm" to="/agenda">
+                Ver Agenda
+              </Link>
+              <Link className="button button-secondary button-sm" to="/classes">
+                Ver Turmas
+              </Link>
+              <Link className="button button-secondary button-sm" to={`/imports/${lastImported.batchId}`}>
+                Detalhes da importação
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="import-layout">
+        <div>
+          <Card
+            className={`dropzone ${file ? 'has-file' : ''}`}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={drop}
+          >
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".csv,text/csv"
+              hidden
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const next = event.target.files?.[0]
+                if (next) void processFile(next)
+              }}
+            />
+            {processing ? (
+              <LoadingState label="Lendo e validando o CSV…" />
+            ) : file ? (
+              <>
+                <span className="file-icon"><FileSpreadsheet /></span>
+                <h2>{file.name}</h2>
+                <p>{formatBytes(file.size)} · {encoding.toUpperCase()} · SHA-256 {fileHash.slice(0, 10)}…</p>
+                <Button variant="secondary" onClick={() => fileInput.current?.click()}>Trocar arquivo</Button>
+              </>
+            ) : (
+              <>
+                <span className="drop-icon"><UploadCloud /></span>
+                <h2>Arraste seu CSV para cá</h2>
+                <p>ou selecione o arquivo oficial exportado do cronograma</p>
+                <Button onClick={() => fileInput.current?.click()}>Selecionar CSV</Button>
+                <small>Somente .csv · até 10 MB · Suporta qualquer instituição</small>
+              </>
+            )}
+          </Card>
+
+          {identical && (
+            <div className="warning-banner positive">
+              <CheckCircle2 />
+              <div>
+                <strong>Este arquivo já é a versão atual deste ciclo.</strong>
+                <span>Nenhuma alteração é necessária e uma nova versão não será criada.</span>
+              </div>
+            </div>
+          )}
+
+          {preview?.fatal && preview.headers.length > 0 && (
+            <ManualMappingCard
+              preview={preview}
+              mapping={manualMapping}
+              onChange={setManualMapping}
+              onApply={() => void applyManualMapping()}
+              loading={processing}
+            />
+          )}
+
+          {preview && <PreviewTable preview={preview} />}
+        </div>
+
+        <aside className="import-summary">
+          <Card>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <p className="eyebrow" style={{ margin: 0 }}>Destino</p>
+              {hasExistingInstitutions && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isNewInstitution
+                    setIsNewInstitution(next)
+                    if (next) setIsNewCycle(true)
+                  }}
+                  style={{ fontSize: '0.73rem', background: 'none', border: 'none', color: 'var(--brand)', cursor: 'pointer', padding: 0, fontWeight: 600 }}
+                >
+                  {isNewInstitution ? 'Selecionar existente' : '+ Nova instituição'}
+                </button>
+              )}
+            </div>
+
+            {/* Instituição */}
+            {hasExistingInstitutions && !isNewInstitution ? (
+              <div style={{ marginBottom: '12px' }}>
+                <label className="field-label" style={{ fontSize: '0.76rem', marginBottom: '4px' }}>Instituição</label>
+                <select
+                  className="input"
+                  value={targetInstitutionId}
+                  onChange={(e) => {
+                    const nextId = e.target.value
+                    setTargetInstitutionId(nextId)
+                    const instCycles = (cycles.data || []).filter((c) => c.institution_id === nextId)
+                    const firstCycle = instCycles[0]
+                    if (firstCycle) {
+                      setTargetCycleId(firstCycle.id)
+                      setIsNewCycle(false)
+                    } else {
+                      setTargetCycleId('')
+                      setIsNewCycle(true)
+                    }
+                  }}
+                >
+                  {institutions.data?.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name} {inst.short_name ? `(${inst.short_name})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div style={{ marginBottom: '12px', display: 'grid', gap: '8px' }}>
+                <div>
+                  <label className="field-label" style={{ fontSize: '0.76rem', marginBottom: '4px' }}>Nome da Instituição *</label>
+                  <Input
+                    placeholder="Ex: Escola da Nuvem, Senac"
+                    value={newInstitutionName}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setNewInstitutionName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="field-label" style={{ fontSize: '0.76rem', marginBottom: '4px' }}>Sigla (opcional)</label>
+                  <Input
+                    placeholder="Ex: EdN, SENAC"
+                    value={newInstitutionShortName}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setNewInstitutionShortName(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Ciclo */}
+            {availableCycles.length > 0 && !isNewInstitution && !isNewCycle ? (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label className="field-label" style={{ fontSize: '0.76rem', margin: 0 }}>Ciclo</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsNewCycle(true)}
+                    style={{ fontSize: '0.73rem', background: 'none', border: 'none', color: 'var(--brand)', cursor: 'pointer', padding: 0, fontWeight: 600 }}
+                  >
+                    + Novo ciclo
+                  </button>
+                </div>
+                <select
+                  className="input"
+                  value={targetCycleId}
+                  onChange={(e) => setTargetCycleId(e.target.value)}
+                >
+                  {availableCycles.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code} {c.name ? `— ${c.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label className="field-label" style={{ fontSize: '0.76rem', margin: 0 }}>Código do Ciclo *</label>
+                  {availableCycles.length > 0 && !isNewInstitution && (
+                    <button
+                      type="button"
+                      onClick={() => setIsNewCycle(false)}
+                      style={{ fontSize: '0.73rem', background: 'none', border: 'none', color: 'var(--brand)', cursor: 'pointer', padding: 0, fontWeight: 600 }}
+                    >
+                      Selecionar existente
+                    </button>
+                  )}
+                </div>
+                <Input
+                  placeholder="Ex: 2026.2, C7-2026"
+                  value={newCycleCode}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setNewCycleCode(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          </Card>
+
+          {preview && (
+            <Card>
+              <p className="eyebrow">Reconhecimento</p>
+              <h2>{preview.validRowCount} eventos</h2>
+              <dl>
+                <div><dt>Turmas</dt><dd>{preview.classes.length}</dd></div>
+                <div><dt>Período</dt><dd>{formatPeriod(preview.periodStart, preview.periodEnd)}</dd></div>
+                <div><dt>Ações CP</dt><dd>{preview.actionRowCount}</dd></div>
+                <div><dt>Horário pendente</dt><dd>{preview.pendingTimeCount}</dd></div>
+              </dl>
+              <div className="class-chips">
+                {preview.classes.map((item) => <Badge key={item} tone="accent">{item}</Badge>)}
+              </div>
+            </Card>
+          )}
+
+          {preview && (
+            <Card className="validation-card">
+              <p className="eyebrow">Validação</p>
+              {preview.fatal ? (
+                <p className="validation error"><TriangleAlert /> Há erros bloqueantes.</p>
+              ) : (
+                <p className="validation success"><ShieldCheck /> Pronto para importar.</p>
+              )}
+              <ul>
+                {preview.issues.slice(0, 5).map((issue, index) => (
+                  <li key={`${issue.code}-${index}`} className={issue.level}>
+                    <span>{issue.level === 'error' ? 'Erro' : 'Aviso'}</span>
+                    {issue.message}
+                    {issue.row && <small>Linha {issue.row}</small>}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          <Button
+            className="confirm-import"
+            disabled={!canConfirm}
+            loading={importing}
+            onClick={() => void confirm()}
+          >
+            {cycleImports.data?.length ? 'Aplicar atualização' : 'Importar cronograma'} <ArrowRight size={16} />
+          </Button>
+        </aside>
+      </div>
     </div>
-  </div>
+  )
 }
 
 function PreviewTable({ preview }: { preview: ImportPreview }) {
