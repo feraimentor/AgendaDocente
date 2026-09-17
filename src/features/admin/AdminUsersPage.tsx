@@ -26,7 +26,7 @@ const ALL_ROLES: { key: UserRole; label: string; desc: string }[] = [
 ]
 
 export function AdminUsersPage() {
-  const { user: currentUser, isMaster } = useAuth()
+  const { user: currentUser, isMaster, refetchPermissions } = useAuth()
   const [users, setUsers] = useState<AdminUserItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'active'>('all')
@@ -80,6 +80,10 @@ export function AdminUsersPage() {
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id !== userId) return u
+        if (u.id === currentUser?.id && role === 'master' && u.roles.includes('master')) {
+          toast.info('Você não pode desmarcar o cargo Master de sua própria conta.')
+          return u
+        }
         const has = u.roles.includes(role)
         const nextRoles = has ? u.roles.filter((r) => r !== role) : [...u.roles, role]
         return { ...u, roles: nextRoles.length ? nextRoles : ['professor'] }
@@ -91,20 +95,34 @@ export function AdminUsersPage() {
     setSavingId(targetUser.id)
     try {
       const client = requireSupabase()
-      // Atualizar status do perfil
-      const { error: profErr } = await client
-        .from('profiles')
-        .update({ account_status: targetUser.account_status })
-        .eq('id', targetUser.id)
-      if (profErr) throw profErr
+      
+      // Chamada atômica via RPC segura
+      const { error: rpcErr } = await client.rpc('admin_set_user_roles', {
+        target_user_id: targetUser.id,
+        target_roles: targetUser.roles,
+        target_account_status: targetUser.account_status,
+      })
 
-      // Atualizar roles
-      await client.from('user_roles').delete().eq('user_id', targetUser.id)
-      const roleRows = targetUser.roles.map((r) => ({ user_id: targetUser.id, role: r }))
-      const { error: rolesErr } = await client.from('user_roles').insert(roleRows)
-      if (rolesErr) throw rolesErr
+      if (rpcErr) {
+        // Fallback direto se a RPC retornar erro
+        const { error: profErr } = await client
+          .from('profiles')
+          .update({ account_status: targetUser.account_status })
+          .eq('id', targetUser.id)
+        if (profErr) throw profErr
+
+        await client.from('user_roles').delete().eq('user_id', targetUser.id)
+        const roleRows = targetUser.roles.map((r) => ({ user_id: targetUser.id, role: r }))
+        const { error: rolesErr } = await client.from('user_roles').insert(roleRows)
+        if (rolesErr) throw rolesErr
+      }
+
+      if (targetUser.id === currentUser?.id && refetchPermissions) {
+        await refetchPermissions()
+      }
 
       toast.success(`Usuário ${targetUser.full_name} atualizado!`)
+      await loadUsers()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao salvar permissões.')
     } finally {
