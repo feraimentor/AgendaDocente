@@ -122,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!check.ok) {
           const body = await check.json().catch(() => ({}))
           if (body?.msg?.includes('missing OAuth client ID') || body?.msg?.includes('provider is not enabled') || body?.error_code === 'validation_failed') {
-            throw new Error('O login com Google requer credenciais (Client ID) vinculadas no Supabase. Por favor, entre com seu e-mail feraimentor@gmail.com e sua senha Master logo abaixo.')
+            throw new Error('O login social com o Google requer credenciais (Client ID) configuradas no Supabase. Por favor, acesse com seu e-mail e senha.')
           }
           throw new Error(body?.msg || 'Provedor Google temporariamente indisponível.')
         }

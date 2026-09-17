@@ -11,7 +11,9 @@ export function LoginPage() {
   const { session, signInWithGoogle } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [email, setEmail] = useState(() => localStorage.getItem('agenda_docente_last_email') || 'feraimentor@gmail.com')
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState(() => localStorage.getItem('agenda_docente_last_email') || '')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -23,12 +25,35 @@ export function LoginPage() {
     setLoading(true)
     try {
       localStorage.setItem('agenda_docente_last_email', email)
-      const result = await requireSupabase().auth.signInWithPassword({ email, password })
-      if (result.error) throw result.error
-      const target = (location.state as { from?: string } | null)?.from ?? '/'
-      navigate(target, { replace: true })
+      const client = requireSupabase()
+
+      if (mode === 'register') {
+        const result = await client.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+              name: fullName.trim(),
+            },
+          },
+        })
+        if (result.error) throw result.error
+        if (result.data.session) {
+          toast.success('Conta criada com sucesso!')
+          navigate('/', { replace: true })
+        } else {
+          toast.success('Conta criada! Por favor, entre com suas credenciais.')
+          setMode('login')
+        }
+      } else {
+        const result = await client.auth.signInWithPassword({ email, password })
+        if (result.error) throw result.error
+        const target = (location.state as { from?: string } | null)?.from ?? '/'
+        navigate(target, { replace: true })
+      }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Não foi possível entrar.')
+      setError(caught instanceof Error ? caught.message : 'Falha na autenticação.')
     } finally {
       setLoading(false)
     }
@@ -36,7 +61,13 @@ export function LoginPage() {
 
   return <AuthLayout><Card className="auth-card">
     <div className="auth-icon"><GraduationCap /></div>
-    <p className="eyebrow">Agenda Docente</p><h1>Bom ter você de volta.</h1><p className="auth-lead">Sua próxima aula e tudo que importa, em um só lugar.</p>
+    <p className="eyebrow">Agenda Docente</p>
+    <h1>{mode === 'login' ? 'Bom ter você de volta.' : 'Crie sua conta docente.'}</h1>
+    <p className="auth-lead">
+      {mode === 'login'
+        ? 'Sua próxima aula e tudo que importa, em um só lugar.'
+        : 'Organize sua rotina, turmas e encontros com serenidade.'}
+    </p>
     {!hasSupabaseConfig && <div className="config-notice"><strong>Configuração necessária</strong><span>Copie <code>.env.example</code> para <code>.env.local</code> e informe as chaves públicas do Supabase.</span></div>}
     
     {error && (
@@ -81,15 +112,83 @@ export function LoginPage() {
 
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1rem 0', color: 'var(--color-text-muted, #94a3b8)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
       <span style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
-      <span>ou com e-mail</span>
+      <span>{mode === 'login' ? 'ou com e-mail' : 'ou cadastre-se com e-mail'}</span>
       <span style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
     </div>
 
     <form onSubmit={(event) => void submit(event)}>
-      <Field label="E-mail"><div className="input-icon"><Mail size={17} /><Input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></Field>
-      <Field label="Senha"><div className="input-icon"><KeyRound size={17} /><Input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} /></div></Field>
-      <div className="auth-row"><Link to="/forgot-password">Esqueci minha senha</Link></div>
-      <Button type="submit" loading={loading} disabled={!hasSupabaseConfig}>Entrar</Button>
+      {mode === 'register' && (
+        <Field label="Nome completo">
+          <Input
+            type="text"
+            autoComplete="name"
+            placeholder="Ex.: Bruno Moreira"
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
+            required
+          />
+        </Field>
+      )}
+      <Field label="E-mail">
+        <div className="input-icon">
+          <Mail size={17} />
+          <Input
+            type="email"
+            autoComplete="email"
+            placeholder="seu.email@exemplo.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+          />
+        </div>
+      </Field>
+      <Field label="Senha">
+        <div className="input-icon">
+          <KeyRound size={17} />
+          <Input
+            type="password"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            minLength={6}
+          />
+        </div>
+      </Field>
+
+      {mode === 'login' && (
+        <div className="auth-row"><Link to="/forgot-password">Esqueci minha senha</Link></div>
+      )}
+
+      <Button type="submit" loading={loading} disabled={!hasSupabaseConfig}>
+        {mode === 'login' ? 'Entrar' : 'Criar minha conta'}
+      </Button>
+
+      <div style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.875rem', color: 'var(--color-text-muted, #94a3b8)' }}>
+        {mode === 'login' ? (
+          <>
+            Não tem uma conta?{' '}
+            <button
+              type="button"
+              style={{ background: 'none', border: 'none', color: 'var(--color-accent, #10b981)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
+              onClick={() => { setError(''); setMode('register') }}
+            >
+              Cadastre-se
+            </button>
+          </>
+        ) : (
+          <>
+            Já possui uma conta?{' '}
+            <button
+              type="button"
+              style={{ background: 'none', border: 'none', color: 'var(--color-accent, #10b981)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
+              onClick={() => { setError(''); setMode('login') }}
+            >
+              Fazer login
+            </button>
+          </>
+        )}
+      </div>
     </form>
   </Card></AuthLayout>
 }
