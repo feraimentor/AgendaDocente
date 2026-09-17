@@ -11,7 +11,7 @@ export function LoginPage() {
   const { session, signInWithGoogle } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(() => localStorage.getItem('agenda_docente_last_email') || 'feraimentor@gmail.com')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -22,6 +22,7 @@ export function LoginPage() {
     setError('')
     setLoading(true)
     try {
+      localStorage.setItem('agenda_docente_last_email', email)
       const result = await requireSupabase().auth.signInWithPassword({ email, password })
       if (result.error) throw result.error
       const target = (location.state as { from?: string } | null)?.from ?? '/'
@@ -37,6 +38,22 @@ export function LoginPage() {
     <div className="auth-icon"><GraduationCap /></div>
     <p className="eyebrow">Agenda Docente</p><h1>Bom ter você de volta.</h1><p className="auth-lead">Sua próxima aula e tudo que importa, em um só lugar.</p>
     {!hasSupabaseConfig && <div className="config-notice"><strong>Configuração necessária</strong><span>Copie <code>.env.example</code> para <code>.env.local</code> e informe as chaves públicas do Supabase.</span></div>}
+    
+    {error && (
+      <div style={{
+        background: 'rgba(239, 68, 68, 0.15)',
+        border: '1px solid rgba(239, 68, 68, 0.35)',
+        color: '#fca5a5',
+        padding: '0.75rem 1rem',
+        borderRadius: '8px',
+        fontSize: '0.85rem',
+        marginBottom: '1rem',
+        lineHeight: 1.4
+      }}>
+        {error}
+      </div>
+    )}
+
     <div style={{ marginBottom: '1rem' }}>
       <Button
         type="button"
@@ -45,6 +62,7 @@ export function LoginPage() {
         disabled={!hasSupabaseConfig}
         onClick={async () => {
           try {
+            setError('')
             await signInWithGoogle()
           } catch (err) {
             setError(err instanceof Error ? err.message : 'Falha ao iniciar login com Google.')
@@ -68,7 +86,7 @@ export function LoginPage() {
     </div>
 
     <form onSubmit={(event) => void submit(event)}>
-      <Field label="E-mail" error={error}><div className="input-icon"><Mail size={17} /><Input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></Field>
+      <Field label="E-mail"><div className="input-icon"><Mail size={17} /><Input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></Field>
       <Field label="Senha"><div className="input-icon"><KeyRound size={17} /><Input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} /></div></Field>
       <div className="auth-row"><Link to="/forgot-password">Esqueci minha senha</Link></div>
       <Button type="submit" loading={loading} disabled={!hasSupabaseConfig}>Entrar</Button>
