@@ -1,17 +1,5 @@
 {
-  "name": "agendadocente",
-  "compatibility_date": "2026-09-16",
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  },
-  "build": {
-    "command": "pnpm build"
-  },
+  "name": "agenda-docente",
   "pages_build_output_dir": "./dist",
-  "vars": {
-    "VITE_APP_NAME": "Agenda Docente",
-    "VITE_SUPABASE_URL": "https://bjurlhpvjknfsqmibyjb.supabase.co",
-    "VITE_SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqdXJsaHB2amtuZnNxbWlieWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1OTEwMDAsImV4cCI6MjEwNTE2NzAwMH0.cVPCkZddukOTK_V5FO1xs2XR30EUiuI09790HIqeZNc"
-  }
+  "compatibility_date": "2026-08-12"
 }
