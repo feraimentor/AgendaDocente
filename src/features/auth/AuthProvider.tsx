@@ -108,31 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = useCallback(async () => {
     if (!supabase) throw new Error('Supabase não inicializado')
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/`,
-        skipBrowserRedirect: true,
-      },
+      options: { redirectTo: `${window.location.origin}/` },
     })
     if (error) throw error
-    if (data?.url) {
-      try {
-        const check = await fetch(data.url, { method: 'GET' })
-        if (!check.ok) {
-          const body = await check.json().catch(() => ({}))
-          if (body?.msg?.includes('missing OAuth client ID') || body?.msg?.includes('provider is not enabled') || body?.error_code === 'validation_failed') {
-            throw new Error('O login social com o Google requer credenciais (Client ID) configuradas no Supabase. Por favor, acesse com seu e-mail e senha.')
-          }
-          throw new Error(body?.msg || 'Provedor Google temporariamente indisponível.')
-        }
-      } catch (checkErr) {
-        if (checkErr instanceof Error && checkErr.message.includes('requer credenciais')) {
-          throw checkErr
-        }
-      }
-      window.location.assign(data.url)
-    }
   }, [])
 
   const value = useMemo<AuthValue>(() => ({
