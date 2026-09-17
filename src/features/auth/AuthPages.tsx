@@ -181,5 +181,21 @@ function PasswordFormLayout(props: PasswordFormLayoutProps) {
 }
 
 function AuthLayout({ children }: { children: React.ReactNode }) {
-  return <main className="auth-page"><div className="auth-visual" aria-hidden="true"><div className="visual-orbit orbit-one" /><div className="visual-orbit orbit-two" /><div className="visual-copy"><span>11 AGO</span><strong>Hoje você tem<br />2 encontros.</strong><p>BRSAO257 · 19:00<br />BRSAO267 · 21:00</p></div></div><div className="auth-form-wrap">{children}<p className="auth-footer">Acesso privado · Seus dados ficam protegidos</p></div></main>
+  return (
+    <main className="auth-page">
+      <div className="auth-visual" aria-hidden="true">
+        <div className="visual-orbit orbit-one" />
+        <div className="visual-orbit orbit-two" />
+        <div className="visual-copy">
+          <span>CALM TECHNOLOGY · COCKPIT DO PROFESSOR</span>
+          <strong>Sua rotina docente<br />com serenidade.</strong>
+          <p>Próxima aula, compromissos do dia e turmas<br />organizados sem sobrecarga mental.</p>
+        </div>
+      </div>
+      <div className="auth-form-wrap">
+        {children}
+        <p className="auth-footer">Acesso privado · Seus dados ficam protegidos</p>
+      </div>
+    </main>
+  )
 }
