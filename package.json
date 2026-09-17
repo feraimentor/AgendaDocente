@@ -16,7 +16,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm build && node scripts/run-e2e.mjs",
-    "test:db": "supabase test db",
+    "deploy": "wrangler@3 pages deploy dist --project-name=agenda-docente --branch=main",
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:lint": "supabase db lint --local"
