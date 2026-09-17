@@ -20,7 +20,7 @@ export function ClassesPage() {
   const events = useEvents(selectedCycleId)
   const cycles = useCycles()
 
-  if (classes.isLoading || events.isLoading) return <LoadingState label="Carregando turmas…" />
+  if (!selectedCycleId || classes.isLoading || events.isLoading) return <LoadingState label="Carregando turmas…" />
   if (classes.isError || events.isError) return <ErrorState message={classes.error?.message ?? events.error?.message ?? 'Erro inesperado'} />
   const cycle = cycles.data?.find((item) => item.id === selectedCycleId)
 

@@ -151,7 +151,7 @@ export function ActionsPage() {
     }
   }
 
-  if (events.isLoading || userActionsQuery.isLoading) return <LoadingState label="Organizando ações com serenidade…" />
+  if (!selectedCycleId || events.isLoading || userActionsQuery.isLoading) return <LoadingState label="Organizando ações com serenidade…" />
   if (events.isError) return <ErrorState message={events.error.message} />
 
   const pendingCount = allActions.filter((a) => a.status === 'pending').length

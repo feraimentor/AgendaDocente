@@ -43,7 +43,7 @@ export function AgendaPage() {
     extendedProps: { source: event },
   }))
 
-  if (events.isLoading) return <LoadingState label="Carregando agenda…" />
+  if (!selectedCycleId || events.isLoading) return <LoadingState label="Carregando agenda…" />
   if (events.isError) return <ErrorState message={events.error.message} />
   return <div><PageTitle eyebrow="Explorar" title="Agenda" description="Dia, semana ou mês — com os detalhes certos na hora certa." />
     <div className="agenda-toolbar"><div className="search-box"><Search size={17} /><Input aria-label="Buscar na agenda" placeholder="Buscar turma, aula, ação ou nota…" value={search} onChange={(event) => setSearch(event.target.value)} /></div><label className="select-wrap"><span className="sr-only">Filtrar por ação</span><select value={actionFilter} onChange={(event) => setActionFilter(event.target.value as typeof actionFilter)}><option value="all">Todas as ações</option><option value="with">Com ação</option><option value="pending">Ação pendente</option></select></label></div>

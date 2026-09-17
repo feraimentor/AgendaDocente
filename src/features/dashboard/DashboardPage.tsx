@@ -31,7 +31,7 @@ export function DashboardPage() {
     }
   })
 
-  if (eventsQuery.isLoading || profile.isLoading) return <LoadingState label="Montando seu cockpit sereno…" />
+  if (!selectedCycleId || eventsQuery.isLoading || profile.isLoading) return <LoadingState label="Montando seu cockpit sereno…" />
   if (eventsQuery.isError) return <ErrorState message={eventsQuery.error.message} retry={() => void eventsQuery.refetch()} />
   const allEvents = eventsQuery.data ?? []
   const events = selectedClassId ? allEvents.filter((event) => event.classId === selectedClassId) : allEvents

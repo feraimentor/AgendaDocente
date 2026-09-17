@@ -46,3 +46,6 @@ export function EmptyState({ icon, title, description, action }: { icon?: ReactN
 export function ErrorState({ message, retry }: { message: string; retry?: () => void }) {
   return <div className="error-state"><strong>Não foi possível carregar.</strong><p>{message}</p>{retry && <Button variant="secondary" onClick={retry}>Tentar novamente</Button>}</div>
 }
+
+export { ErrorBoundary } from './ErrorBoundary'
+

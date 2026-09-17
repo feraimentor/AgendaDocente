@@ -4,21 +4,25 @@ import type { ScheduleEvent } from '../../types/domain'
 export type TemporalEventState = 'future' | 'soon' | 'in_progress' | 'finished' | 'pending_time'
 
 function splitDate(date: string): [number, number, number] {
+  if (!date) return [2026, 1, 1]
   const [year, month, day] = date.split('-').map(Number)
-  if (!year || !month || !day) throw new Error(`Data ISO inválida: ${date}`)
-  return [year, month, day]
+  return [year || 2026, month || 1, day || 1]
 }
 
 function splitTime(time: string): [number, number] {
+  if (!time) return [0, 0]
   const [hour, minute] = time.split(':').map(Number)
-  if (hour === undefined || minute === undefined) throw new Error(`Horário inválido: ${time}`)
-  return [hour, minute]
+  return [hour ?? 0, minute ?? 0]
 }
 
 export function zonedEpochMilliseconds(date: string, time: string, timeZone: string): number {
-  const [year, month, day] = splitDate(date)
-  const [hour, minute] = splitTime(time)
-  return Number(Temporal.ZonedDateTime.from({ year, month, day, hour, minute, timeZone }).epochMilliseconds)
+  try {
+    const [year, month, day] = splitDate(date)
+    const [hour, minute] = splitTime(time)
+    return Number(Temporal.ZonedDateTime.from({ year, month, day, hour, minute, timeZone }).epochMilliseconds)
+  } catch {
+    return 0
+  }
 }
 
 export function todayIso(now: Date, timeZone: string): string {

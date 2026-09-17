@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
-import { LoadingState } from '../../components/ui'
+import { ErrorState, LoadingState } from '../../components/ui'
 import { useAuth } from '../../features/auth/AuthProvider'
 import { useProfile } from '../../features/data/queries'
 import { requiresPasswordChange } from '../../features/auth/password'
@@ -30,7 +30,16 @@ export function ProfileGate() {
   const { user } = useAuth()
   const profile = useProfile(user?.id)
   if (profile.isLoading) return <main className="centered-page"><LoadingState label="Preparando sua agenda…" /></main>
-  if (profile.isError) return <Navigate to="/onboarding" replace />
+  if (profile.isError) {
+    return (
+      <main className="centered-page" style={{ padding: '2rem' }}>
+        <ErrorState
+          message={profile.error?.message || 'Não foi possível carregar as informações do seu perfil.'}
+          retry={() => void profile.refetch()}
+        />
+      </main>
+    )
+  }
   if (!profile.data) return <Navigate to="/onboarding" replace />
   return <Outlet />
 }
@@ -40,4 +49,3 @@ export function FirstAccessGate() {
   if (requiresPasswordChange(user)) return <Navigate to="/first-access" replace />
   return <Outlet />
 }
-
