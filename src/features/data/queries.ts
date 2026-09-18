@@ -61,9 +61,21 @@ export function useClasses(cycleId?: string) {
       const classResult = await client.from('teaching_classes').select('*').eq('cycle_id', cycleId!).is('archived_at', null).order('code')
       const classes = dataOrThrow(classResult.data as TeachingClass[] | null, classResult.error)
       if (!classes.length) return classes
-      const prefResult = await client.from('class_preferences').select('class_id,color_token,note_text').in('class_id', classes.map((item) => item.id))
+      const prefResult = await client
+        .from('class_preferences')
+        .select('class_id,color_token,note_text,meeting_url,drive_url,contact_info')
+        .in('class_id', classes.map((item) => item.id))
       if (prefResult.error) throw new Error(prefResult.error.message)
-      const preferences = new Map((prefResult.data as { class_id: string; color_token: string | null; note_text: string | null }[]).map((item) => [item.class_id, item]))
+      const preferences = new Map(
+        (prefResult.data as {
+          class_id: string
+          color_token: string | null
+          note_text: string | null
+          meeting_url: string | null
+          drive_url: string | null
+          contact_info: string | null
+        }[]).map((item) => [item.class_id, item])
+      )
       return classes.map((item) => ({ ...item, ...preferences.get(item.id) }))
     },
   })
@@ -272,6 +284,7 @@ export function useCreateClassTask(classId?: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+      void queryClient.invalidateQueries({ queryKey: ['all_cycle_tasks'] })
     },
   })
 }
@@ -288,6 +301,7 @@ export function useToggleClassTask(classId?: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+      void queryClient.invalidateQueries({ queryKey: ['all_cycle_tasks'] })
     },
   })
 }
@@ -304,6 +318,7 @@ export function usePinClassTask(classId?: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+      void queryClient.invalidateQueries({ queryKey: ['all_cycle_tasks'] })
     },
   })
 }
@@ -317,7 +332,71 @@ export function useDeleteClassTask(classId?: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['class_tasks', classId] })
+      void queryClient.invalidateQueries({ queryKey: ['all_cycle_tasks'] })
     },
   })
 }
+
+export function useAllCycleClassTasks(cycleId?: string) {
+  const classesQuery = useClasses(cycleId)
+  return useQuery({
+    queryKey: ['all_cycle_tasks', cycleId ?? 'none'],
+    enabled: Boolean(cycleId) && classesQuery.isSuccess,
+    queryFn: async () => {
+      const classes = classesQuery.data ?? []
+      if (!classes.length) return []
+      const classMap = new Map(classes.map((c) => [c.id, c]))
+      const client = requireSupabase()
+      const result = await client
+        .from('class_tasks')
+        .select('*')
+        .in('class_id', classes.map((c) => c.id))
+        .is('archived_at', null)
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false })
+      if (result.error) throw new Error(result.error.message)
+      const tasks = (result.data || []) as ClassTaskRow[]
+      return tasks.map((t) => {
+        const classObj = classMap.get(t.class_id)
+        return {
+          ...t,
+          classCode: classObj?.code ?? 'Turma',
+          classColor: classObj?.color_token ?? 'teal',
+        }
+      })
+    },
+  })
+}
+
+export function useCreateInstitution() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      userId,
+      name,
+      shortName,
+    }: {
+      userId: string
+      name: string
+      shortName?: string
+    }) => {
+      const client = requireSupabase()
+      const result = await client
+        .from('institutions')
+        .insert({
+          user_id: userId,
+          name: name.trim(),
+          short_name: shortName?.trim() || null,
+        })
+        .select()
+        .single()
+      if (result.error) throw new Error(result.error.message)
+      return result.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.institutions })
+    },
+  })
+}
+
 

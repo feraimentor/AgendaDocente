@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Cable, Check, Globe, Plus, ShieldAlert, Trash2 } from 'lucide-react'
+import { Building2, Cable, Check, Globe, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadingState, PageTitle } from '../../components/ui'
 import { requireSupabase } from '../../lib/supabase/client'
 import { useAuth } from '../auth/AuthProvider'
-import { useInstitutions } from '../data/queries'
+import { useCreateInstitution, useInstitutions } from '../data/queries'
 import type { InstitutionIntegration } from '../../types/domain'
 
 export function AdminIntegrationsPage() {
   const { user, isMaster, isAdmin } = useAuth()
   const institutions = useInstitutions()
+  const createInstitution = useCreateInstitution()
   const [integrations, setIntegrations] = useState<InstitutionIntegration[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+
+  // Instituição modal state
+  const [showInstModal, setShowInstModal] = useState(false)
+  const [newInstName, setNewInstName] = useState('')
+  const [newInstShortName, setNewInstShortName] = useState('')
+  const [savingInst, setSavingInst] = useState(false)
 
   // Form state
   const [institutionId, setInstitutionId] = useState('')
@@ -79,6 +86,33 @@ export function AdminIntegrationsPage() {
     }
   }
 
+  const handleCreateInstitution = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!user || !newInstName.trim()) {
+      toast.error('Informe o nome da instituição.')
+      return
+    }
+    setSavingInst(true)
+    try {
+      const created = await createInstitution.mutateAsync({
+        userId: user.id,
+        name: newInstName.trim(),
+        shortName: newInstShortName.trim() || undefined,
+      })
+      toast.success('Instituição parceira cadastrada com sucesso!')
+      setShowInstModal(false)
+      setNewInstName('')
+      setNewInstShortName('')
+      if (created?.id) {
+        setInstitutionId(created.id)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao cadastrar instituição.')
+    } finally {
+      setSavingInst(false)
+    }
+  }
+
   const handleDelete = async (id: string) => {
     if (!confirm('Deseja realmente remover esta conexão de API?')) return
     try {
@@ -109,9 +143,14 @@ export function AdminIntegrationsPage() {
           title="APIs Institucionais"
           description="Conecte calendários e cronogramas de instituições de ensino parceiras via API ou Webhooks."
         />
-        <Button variant="primary" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> Nova Conexão de API
-        </Button>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <Button variant="secondary" onClick={() => setShowInstModal(true)}>
+            <Building2 size={16} /> Nova Instituição Parceira
+          </Button>
+          <Button variant="primary" onClick={() => setShowModal(true)}>
+            <Plus size={16} /> Nova Conexão de API
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -122,9 +161,14 @@ export function AdminIntegrationsPage() {
           title="Nenhum conector de API cadastrado"
           description="Você pode integrar cronogramas institucionais externos via REST API, Webhook ou sincronização de Google Calendar."
           action={
-            <Button variant="secondary" onClick={() => setShowModal(true)}>
-              <Plus size={16} /> Configurar Primeira Conexão
-            </Button>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Button variant="secondary" onClick={() => setShowInstModal(true)}>
+                <Building2 size={16} /> Cadastrar Instituição
+              </Button>
+              <Button variant="primary" onClick={() => setShowModal(true)}>
+                <Plus size={16} /> Configurar Primeira Conexão
+              </Button>
+            </div>
           }
         />
       ) : (
@@ -161,6 +205,7 @@ export function AdminIntegrationsPage() {
         </div>
       )}
 
+      {/* Modal de Conexão de API Institucional */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }}>
           <Card className="settings-card" style={{ maxWidth: '540px', width: '100%', padding: '1.75rem' }}>
@@ -170,7 +215,27 @@ export function AdminIntegrationsPage() {
             </p>
 
             <form onSubmit={(e) => void handleCreate(e)}>
-              <Field label="Instituição Parceira">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
+                <span className="field-label" style={{ margin: 0 }}>Instituição Parceira</span>
+                <button
+                  type="button"
+                  onClick={() => setShowInstModal(true)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--brand, #10b981)',
+                    fontSize: '0.8125rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <Plus size={13} /> Nova Instituição
+                </button>
+              </div>
+              <div style={{ marginBottom: '1rem' }}>
                 <select
                   className="input"
                   value={institutionId}
@@ -182,7 +247,7 @@ export function AdminIntegrationsPage() {
                     <option key={inst.id} value={inst.id}>{inst.name} ({inst.short_name || 'Geral'})</option>
                   ))}
                 </select>
-              </Field>
+              </div>
 
               <Field label="Tipo de Provedor / Protocolo">
                 <select
@@ -246,6 +311,49 @@ export function AdminIntegrationsPage() {
                 </Button>
                 <Button type="submit" variant="primary" loading={saving}>
                   <Check size={16} /> Salvar Conector
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* Modal de Nova Instituição Parceira */}
+      {showInstModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110, padding: '1rem' }}>
+          <Card className="settings-card" style={{ maxWidth: '480px', width: '100%', padding: '1.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '0.5rem' }}>
+              <Building2 size={20} color="#10b981" />
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>Nova Instituição Parceira</h2>
+            </div>
+            <p style={{ color: 'var(--color-text-muted, #94a3b8)', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+              Cadastre uma instituição de ensino parceira para vincular conectores de API e cronogramas.
+            </p>
+
+            <form onSubmit={(e) => void handleCreateInstitution(e)}>
+              <Field label="Nome Completo da Instituição">
+                <Input
+                  placeholder="Ex.: Escola da Nuvem, FIAP, Senac..."
+                  value={newInstName}
+                  onChange={(e) => setNewInstName(e.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field label="Sigla ou Nome Curto (opcional)">
+                <Input
+                  placeholder="Ex.: EdN, FIAP, SENAC..."
+                  value={newInstShortName}
+                  onChange={(e) => setNewInstShortName(e.target.value)}
+                />
+              </Field>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <Button type="button" variant="ghost" onClick={() => setShowInstModal(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" variant="primary" loading={savingInst}>
+                  <Check size={16} /> Cadastrar Instituição
                 </Button>
               </div>
             </form>

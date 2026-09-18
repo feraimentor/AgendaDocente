@@ -1,13 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowUpRight, CalendarCheck2, Check, CheckSquare2, Clock3, Import, RefreshCw, Sparkles, TriangleAlert, X } from 'lucide-react'
+import {
+  ArrowUpRight,
+  CalendarCheck2,
+  Check,
+  CheckSquare2,
+  Clock3,
+  FolderOpen,
+  Import,
+  MessageCircle,
+  RefreshCw,
+  Sparkles,
+  TriangleAlert,
+  Users,
+  Video,
+  X,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState } from '../../components/ui'
 import { useAuth } from '../auth/AuthProvider'
-import { useEvents, useImports, useProfile, useToggleAction } from '../data/queries'
+import {
+  useAllCycleClassTasks,
+  useClasses,
+  useEvents,
+  useImports,
+  useProfile,
+  useToggleAction,
+  useToggleClassTask,
+  useToggleUserAction,
+  useUserActions,
+} from '../data/queries'
 import { useWorkspace } from '../../app/providers/WorkspaceProvider'
 import { cycleProgress, findScheduleConflicts, totalKnownHours } from '../../lib/schedule/metrics'
 import { formatLongDate, getTemporalEventState, nextScheduleEvent, todayIso } from '../../lib/dates/schedule'
 import { generateDailyBriefing } from '../../lib/ai/gemini'
+import { formatTeamsUrl, formatWhatsAppUrl, parseClassContacts } from '../../lib/contacts/classContacts'
 import type { EventWithRelations } from '../../types/domain'
 
 export function DashboardPage() {
@@ -15,8 +41,13 @@ export function DashboardPage() {
   const profile = useProfile(user?.id)
   const { selectedCycleId, selectedClassId } = useWorkspace()
   const eventsQuery = useEvents(selectedCycleId)
+  const classesQuery = useClasses(selectedCycleId)
+  const userActionsQuery = useUserActions(selectedCycleId)
+  const cycleTasksQuery = useAllCycleClassTasks(selectedCycleId)
   const imports = useImports(selectedCycleId)
   const toggleAction = useToggleAction(selectedCycleId)
+  const toggleUserAction = useToggleUserAction(selectedCycleId)
+  const toggleClassTask = useToggleClassTask()
 
   const [briefing, setBriefing] = useState<string>('')
   const [loadingBriefing, setLoadingBriefing] = useState(false)
@@ -38,15 +69,73 @@ export function DashboardPage() {
     [allEvents, selectedClassId]
   )
 
+  const classes = useMemo(() => classesQuery.data ?? [], [classesQuery.data])
+  const classMap = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes])
+
   const todayEvents = useMemo(() => events.filter((event) => event.eventDate === today), [events, today])
   const next = useMemo(
     () => (events.length ? (nextScheduleEvent(events, now, timeZone) as EventWithRelations | null) : null),
     [events, now, timeZone]
   )
-  const pendingActions = useMemo(
-    () => events.filter((event) => event.actionId && event.actionStatus !== 'completed'),
-    [events]
+  const nextTeachingClass = useMemo(
+    () => (next?.classId ? classMap.get(next.classId) : undefined),
+    [classMap, next]
   )
+
+  // 1. Institucionais pendentes
+  const institutionalPending = useMemo(() => {
+    return events
+      .filter((event) => event.actionId && event.actionStatus !== 'completed')
+      .map((event) => ({
+        id: event.actionId!,
+        title: event.actionText || 'Ação do cronograma',
+        subtitle: `${event.classCode} · ${shortDate(event.eventDate)}`,
+        origin: 'institutional' as const,
+        originLabel: 'Cronograma',
+        classColor: event.classColor ?? 'teal',
+        onComplete: () => event.actionId && toggleAction.mutate({ actionId: event.actionId, status: 'completed' }),
+      }))
+  }, [events, toggleAction])
+
+  // 2. Ações autorais pendentes
+  const authorialPending = useMemo(() => {
+    return (userActionsQuery.data ?? [])
+      .filter((ua) => ua.status !== 'completed')
+      .filter((ua) => !selectedClassId || ua.class_id === selectedClassId)
+      .map((ua) => {
+        const classObj = ua.class_id ? classMap.get(ua.class_id) : undefined
+        return {
+          id: ua.id,
+          title: ua.title,
+          subtitle: `${classObj ? classObj.code : 'Geral'}${ua.due_date ? ` · Prazo: ${shortDate(ua.due_date)}` : ''}`,
+          origin: 'authorial' as const,
+          originLabel: 'Autoral',
+          classColor: classObj?.color_token ?? 'indigo',
+          onComplete: () => toggleUserAction.mutate({ id: ua.id, status: 'completed' }),
+        }
+      })
+  }, [userActionsQuery.data, selectedClassId, classMap, toggleUserAction])
+
+  // 3. Notas / Tarefas do Quadro da Turma pendentes
+  const classTasksPending = useMemo(() => {
+    return (cycleTasksQuery.data ?? [])
+      .filter((ct) => !ct.is_completed)
+      .filter((ct) => !selectedClassId || ct.class_id === selectedClassId)
+      .map((ct) => ({
+        id: ct.id,
+        title: ct.title,
+        subtitle: `Turma ${ct.classCode}`,
+        origin: 'class_task' as const,
+        originLabel: ct.classCode,
+        classColor: ct.classColor ?? 'teal',
+        onComplete: () => toggleClassTask.mutate({ id: ct.id, isCompleted: true }),
+      }))
+  }, [cycleTasksQuery.data, selectedClassId, toggleClassTask])
+
+  // Unificação de todas as ações pendentes
+  const unifiedPendingActions = useMemo(() => {
+    return [...institutionalPending, ...authorialPending, ...classTasksPending]
+  }, [institutionalPending, authorialPending, classTasksPending])
   const weekEvents = useMemo(() => filterCurrentWeek(events, today), [events, today])
   const progress = useMemo(() => cycleProgress(events, now, timeZone), [events, now, timeZone])
 
@@ -80,13 +169,13 @@ export function DashboardPage() {
         dateStr: formatLongDate(today),
         todayCount: todayEvents.length,
         nextEvent: next ? { title: next.title, time: next.startTime || 'A definir', classCode: next.classCode } : undefined,
-        pendingActionsCount: pendingActions.length,
+        pendingActionsCount: unifiedPendingActions.length,
       })
       setBriefing(text)
     } finally {
       setLoadingBriefing(false)
     }
-  }, [displayName, events.length, next, pendingActions.length, today, todayEvents.length])
+  }, [displayName, events.length, next, unifiedPendingActions.length, today, todayEvents.length])
 
   useEffect(() => {
     if (events.length > 0) {
@@ -193,7 +282,13 @@ export function DashboardPage() {
             <Sparkles size={17} />
           </div>
           {next ? (
-            <NextEvent event={next} now={now} timeZone={timeZone} todayCount={todayEvents.length} />
+            <NextEvent
+              event={next}
+              teachingClass={nextTeachingClass}
+              now={now}
+              timeZone={timeZone}
+              todayCount={todayEvents.length}
+            />
           ) : (
             <div className="now-empty">
               <h2>Ciclo concluído</h2>
@@ -205,7 +300,7 @@ export function DashboardPage() {
           <Kpi label="Aulas hoje" value={String(todayEvents.length)} icon={<CalendarCheck2 />} />
           <Kpi label="Aulas na semana" value={String(weekEvents.length)} icon={<CalendarCheck2 />} />
           <Kpi label="Horas na semana" value={formatHours(totalKnownHours(weekEvents))} icon={<Clock3 />} />
-          <Kpi label="Ações pendentes" value={String(pendingActions.length)} icon={<CheckSquare2 />} />
+          <Kpi label="Ações pendentes" value={String(unifiedPendingActions.length)} icon={<CheckSquare2 />} />
         </div>
       </section>
 
@@ -229,7 +324,7 @@ export function DashboardPage() {
               if (firstConflict) {
                 handleDismissConflict(
                   `${firstConflict.date}_${firstConflict.first.classCode}_${firstConflict.second.classCode}`
-                );
+                )
               }
             }}
             style={{
@@ -266,6 +361,8 @@ export function DashboardPage() {
               ))}
           </div>
         </Card>
+
+        {/* Foco: Ações Unificadas (Cronograma, Autorais e Anotações da Turma) */}
         <Card className="section-card">
           <div className="section-heading">
             <div>
@@ -277,23 +374,34 @@ export function DashboardPage() {
             </Link>
           </div>
           <div className="action-list">
-            {pendingActions.length ? (
-              pendingActions.slice(0, 4).map((event) => (
-                <div className="quick-action" key={event.actionId}>
-                  <span className={`class-dot color-${event.classColor ?? 'teal'}`} />
-                  <div>
-                    <strong>{event.actionText}</strong>
-                    <span>
-                      {event.classCode} · {shortDate(event.eventDate)}
-                    </span>
+            {unifiedPendingActions.length ? (
+              unifiedPendingActions.slice(0, 5).map((item) => (
+                <div className="quick-action" key={`${item.origin}_${item.id}`}>
+                  <span className={`class-dot color-${item.classColor}`} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                      <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}>
+                        {item.title}
+                      </strong>
+                      <Badge
+                        tone={
+                          item.origin === 'institutional'
+                            ? 'warning'
+                            : item.origin === 'authorial'
+                            ? 'accent'
+                            : 'positive'
+                        }
+                      >
+                        {item.originLabel}
+                      </Badge>
+                    </div>
+                    <span>{item.subtitle}</span>
                   </div>
                   <Button
                     size="icon"
                     variant="secondary"
-                    aria-label={`Concluir ${event.actionText}`}
-                    onClick={() =>
-                      event.actionId && toggleAction.mutate({ actionId: event.actionId, status: 'completed' })
-                    }
+                    aria-label={`Concluir ${item.title}`}
+                    onClick={() => item.onComplete()}
                   >
                     <Check size={16} />
                   </Button>
@@ -336,11 +444,19 @@ export function DashboardPage() {
 
 function NextEvent({
   event,
+  teachingClass,
   now,
   timeZone,
   todayCount,
 }: {
   event: EventWithRelations
+  teachingClass?: {
+    id: string
+    code: string
+    meeting_url?: string | null
+    drive_url?: string | null
+    contact_info?: string | null
+  }
   now: Date
   timeZone: string
   todayCount: number
@@ -355,6 +471,15 @@ function NextEvent({
       : isToday
       ? `Você tem ${todayCount} ${todayCount === 1 ? 'aula' : 'aulas'} hoje`
       : 'Sua próxima aula'
+
+  const meetingUrl = teachingClass?.meeting_url
+  const driveUrl = teachingClass?.drive_url
+  const contacts = useMemo(() => parseClassContacts(teachingClass?.contact_info), [teachingClass?.contact_info])
+  const primaryContact = contacts.find((c) => c.is_primary) ?? contacts[0]
+  const whatsUrl = primaryContact?.whatsapp ? formatWhatsAppUrl(primaryContact.whatsapp) : ''
+  const teamsUrl = primaryContact?.teams ? formatTeamsUrl(primaryContact.teams) : ''
+  const hasQuickActions = Boolean(meetingUrl || driveUrl || whatsUrl || teamsUrl)
+
   return (
     <div className="next-event">
       <Badge tone={state === 'in_progress' ? 'positive' : state === 'pending_time' ? 'warning' : 'accent'}>
@@ -375,6 +500,127 @@ function NextEvent({
         </strong>
       </div>
       {state === 'in_progress' && <p>Termina às {event.endTime}</p>}
+
+      {/* Botões redondos translúcidos de acesso rápido (Sala Virtual, Drive, WhatsApp, Teams) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+        {meetingUrl && (
+          <a
+            href={meetingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Entrar na Sala Virtual"
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: 'rgba(255, 255, 255, 0.16)',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            }}
+          >
+            <Video size={18} />
+          </a>
+        )}
+
+        {driveUrl && (
+          <a
+            href={driveUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Abrir pasta no Google Drive"
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: 'rgba(255, 255, 255, 0.16)',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            }}
+          >
+            <FolderOpen size={18} />
+          </a>
+        )}
+
+        {primaryContact && whatsUrl && (
+          <a
+            href={whatsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`WhatsApp: ${primaryContact.name} (${primaryContact.role})`}
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: 'rgba(37, 211, 102, 0.22)',
+              border: '1px solid rgba(37, 211, 102, 0.45)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#4ade80',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            }}
+          >
+            <MessageCircle size={18} />
+          </a>
+        )}
+
+        {primaryContact && teamsUrl && (
+          <a
+            href={teamsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Microsoft Teams: ${primaryContact.name} (${primaryContact.role})`}
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: 'rgba(99, 102, 241, 0.25)',
+              border: '1px solid rgba(99, 102, 241, 0.45)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#a5b4fc',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            }}
+          >
+            <Users size={18} />
+          </a>
+        )}
+
+        {!hasQuickActions && event.classId && (
+          <Link
+            to={`/classes/${event.classId}`}
+            style={{
+              fontSize: '0.75rem',
+              color: 'rgba(255, 255, 255, 0.7)',
+              textDecoration: 'underline',
+              marginTop: '0.25rem',
+            }}
+          >
+            Configurar links da turma (Meet, Drive, Monitor)
+          </Link>
+        )}
+      </div>
     </div>
   )
 }
@@ -458,7 +704,8 @@ function relativeDate(value: string) {
   )
 }
 
-function shortDate(value: string) {
+function shortDate(value?: string | null) {
+  if (!value) return ''
   return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(
     new Date(`${value}T00:00:00Z`)
   )

@@ -158,3 +158,14 @@ export interface ClassPreferencesData {
   drive_url?: string | null
   contact_info?: string | null
 }
+
+export interface ClassContact {
+  id: string
+  name: string
+  role: string
+  whatsapp: string
+  teams: string
+  notes?: string
+  is_primary?: boolean
+}
+
